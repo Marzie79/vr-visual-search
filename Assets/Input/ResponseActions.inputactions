@@ -1,0 +1,84 @@
+{
+    "name": "ResponseActions",
+    "maps": [
+        {
+            "name": "Yes",
+            "id": "dd9335b4-452b-41ca-b368-c74c3d27b2a4",
+            "actions": [
+                {
+                    "name": "Responses",
+                    "type": "Button",
+                    "id": "a4d2794c-4c7e-4a16-8fda-56ca9b7e0477",
+                    "expectedControlType": "",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                }
+            ],
+            "bindings": [
+                {
+                    "name": "",
+                    "id": "f8a36363-29c8-475a-a748-036253b04b76",
+                    "path": "<XRController>{RightHand}/primaryButton",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Responses",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "60cc5c0d-5910-40cf-a91e-4f596167fe38",
+                    "path": "<XRController>{LeftHand}/primaryButton",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Responses",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                }
+            ]
+        },
+        {
+            "name": "No",
+            "id": "8440d278-fb05-4dc8-a072-fb34109511a9",
+            "actions": [
+                {
+                    "name": "Responses",
+                    "type": "Button",
+                    "id": "affe0610-6ee6-4300-bd0c-b1341714b075",
+                    "expectedControlType": "",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                }
+            ],
+            "bindings": [
+                {
+                    "name": "",
+                    "id": "0a3156d1-0b3d-42fa-a39e-90e8d33bda82",
+                    "path": "<XRController>{RightHand}/secondaryButton",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Responses",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "9b476967-651d-4da6-a990-cfc7518f2181",
+                    "path": "<XRController>{LeftHand}/secondaryButton",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Responses",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                }
+            ]
+        }
+    ],
+    "controlSchemes": []
+}

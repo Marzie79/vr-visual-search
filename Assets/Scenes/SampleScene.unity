@@ -38,7 +38,7 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 705507994}
-  m_IndirectSpecularColor: {r: 0.18028343, g: 0.22571331, b: 0.3069217, a: 1}
+  m_IndirectSpecularColor: {r: 0.18028383, g: 0.22571409, b: 0.30692282, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -180,6 +180,8 @@ GameObject:
   - component: {fileID: 349629017}
   - component: {fileID: 349629016}
   - component: {fileID: 349629015}
+  - component: {fileID: 349629018}
+  - component: {fileID: 349629019}
   m_Layer: 0
   m_Name: XR Origin (VR)
   m_TagString: Untagged
@@ -215,8 +217,8 @@ MonoBehaviour:
   m_Camera: {fileID: 1324545234}
   m_OriginBaseGameObject: {fileID: 349629014}
   m_CameraFloorOffsetObject: {fileID: 1422813769}
-  m_RequestedTrackingOriginMode: 0
-  m_CameraYOffset: 1.1176
+  m_RequestedTrackingOriginMode: 1
+  m_CameraYOffset: 0
 --- !u!4 &349629017
 Transform:
   m_ObjectHideFlags: 0
@@ -233,6 +235,35 @@ Transform:
   - {fileID: 1422813770}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &349629018
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 349629014}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f85abb7126fa66a42bb4adb3a333422e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  xrOrigin: {fileID: 349629016}
+  fallbackEyeHeight: 1.6
+--- !u!114 &349629019
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 349629014}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 57db3fb00b62c0745babcf298536f6e1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  xrOrigin: {fileID: 349629016}
+  eyeHeightMeters: 1.7
+  logDetails: 1
 --- !u!1 &556711874
 GameObject:
   m_ObjectHideFlags: 0
@@ -461,32 +492,50 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a30580d481e254d49a823c07e19a12a6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  yesAction:
+    m_UseReference: 1
+    m_Action:
+      m_Name: Yes
+      m_Type: 0
+      m_ExpectedControlType: 
+      m_Id: 6da05716-7674-4079-bd24-baf8758887d5
+      m_Processors: 
+      m_Interactions: 
+      m_SingletonActionBindings: []
+      m_Flags: 0
+    m_Reference: {fileID: 6168550758827904465, guid: 2c0e4f7cdc60edd4888cb0362f769492, type: 3}
+  noAction:
+    m_UseReference: 1
+    m_Action:
+      m_Name: No
+      m_Type: 0
+      m_ExpectedControlType: 
+      m_Id: 40fbd220-ad49-44d3-8313-c37c7ba684eb
+      m_Processors: 
+      m_Interactions: 
+      m_SingletonActionBindings: []
+      m_Flags: 0
+    m_Reference: {fileID: -6562575144054473281, guid: 2c0e4f7cdc60edd4888cb0362f769492, type: 3}
   logger: {fileID: 1319428999}
   cam: {fileID: 1324545234}
   table: {fileID: 906842107}
   objectPrefab: {fileID: 4323438354563354819, guid: 91a6afb62c493954a9d183b8dd5f9c6a, type: 3}
   instructionText: {fileID: 0}
   feedbackText: {fileID: 0}
-  nTrials: 2
-  setSizeLevels: 0600000008000000
-  retentionLevels:
-  - 1
-  - 2
   interTrialSecs: 1
-  changeProbability: 0.5
+  studySecs: 3
+  retentionSecs: 1
+  testMaxSecs: 6
+  gridSize: 3
+  gridSpacing: 0.3
+  objectScale: 0.2
   objectMaterials:
   - {fileID: 2100000, guid: e14e8116847557545a729dbea936947c, type: 2}
   - {fileID: 2100000, guid: d964408dbb919c74f9c3be231783a73c, type: 2}
   - {fileID: 2100000, guid: 5404bdf39647c2f469bcf21f05db07d9, type: 2}
   - {fileID: 2100000, guid: 50d1162982c6787419dc86893ee38178, type: 2}
-  studySecs: 3
-  retentionSecs: 1
-  testMaxSecs: 6
-  setSize: 8
-  gridSize: 3
-  gridSpacing: 0.3
-  objectScale: 0.2
   gazeSourceComponent: {fileID: 1009234024}
+  csvFileName: trials_plan.csv
 --- !u!4 &729752849
 Transform:
   m_ObjectHideFlags: 0
@@ -702,6 +751,7 @@ MonoBehaviour:
   gazeSourceComponent: {fileID: 1009234024}
   cam: {fileID: 1324545234}
   sessionFileNamePrefix: gaze_session
+  minFixDurMs: 100
 --- !u!4 &1319429000
 Transform:
   m_ObjectHideFlags: 0
@@ -1250,6 +1300,10 @@ PrefabInstance:
     - target: {fileID: 6598815579406187037, guid: 18ddb545287c546e19cc77dc9fbb2189, type: 3}
       propertyPath: m_Name
       value: XR Device Simulator
+      objectReference: {fileID: 0}
+    - target: {fileID: 6598815579406187037, guid: 18ddb545287c546e19cc77dc9fbb2189, type: 3}
+      propertyPath: m_IsActive
+      value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []

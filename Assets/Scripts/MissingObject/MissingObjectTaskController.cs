@@ -3,8 +3,9 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using TMPro;                   // if you use TextMeshPro
 using UnityEngine;
-using TMPro;  // Remove if you use legacy UI instead of TextMeshPro
+using UnityEngine.InputSystem; // for InputAction / InputActionProperty
 
 /// <summary>
 /// Missing-Object Task (VR/Simulator-ready)
@@ -18,6 +19,14 @@ using TMPro;  // Remove if you use legacy UI instead of TextMeshPro
 /// </summary>
 public class MissingObjectTaskController : MonoBehaviour
 {
+    [Header("Responses (Input System)")]
+    [Tooltip("Button for YES (\"something is missing\"). Bind to keyboard Y, XR primary, etc.")]
+    public InputActionProperty yesAction;
+
+    [Tooltip("Button for NO (\"nothing is missing\"). Bind to keyboard N, XR secondary, etc.")]
+    public InputActionProperty noAction;
+
+    private bool _responded = false;  // lock to prevent double responses
     // ---------------------------------------------------------------------
     // Logging (optional but recommended)
     // ---------------------------------------------------------------------
@@ -120,6 +129,40 @@ public class MissingObjectTaskController : MonoBehaviour
     private bool awaitingResponse = false;
     private bool _aoiMapLoggedThisTrial = false; // ensures AOI map is logged only once (during Study)
 
+    private void OnEnable()
+    {
+        if (yesAction.action != null) yesAction.action.performed += OnYesPerformed;
+        if (noAction.action != null)  noAction.action.performed  += OnNoPerformed;
+
+        yesAction.action?.Enable();
+        noAction.action?.Enable();
+    }
+
+    private void OnDisable()
+    {
+        if (yesAction.action != null) yesAction.action.performed -= OnYesPerformed;
+        if (noAction.action != null)  noAction.action.performed  -= OnNoPerformed;
+
+        yesAction.action?.Disable();
+        noAction.action?.Disable();
+    }
+
+    private void OnYesPerformed(InputAction.CallbackContext ctx)
+    {
+        if (!awaitingResponse || _responded) return;
+        _responded = true;
+        logger?.LogEvent("BUTTON", "YES");
+        OnResponse(true);
+    }
+
+    private void OnNoPerformed(InputAction.CallbackContext ctx)
+    {
+        if (!awaitingResponse || _responded) return;
+        _responded = true;
+        logger?.LogEvent("BUTTON", "NO");
+        OnResponse(false);
+    }
+
     // =====================================================================
     // Unity lifecycle
     // =====================================================================
@@ -185,46 +228,37 @@ public class MissingObjectTaskController : MonoBehaviour
     {
         try
         {
-            string path =
-#if UNITY_ANDROID && !UNITY_EDITOR
-                Path.Combine(Application.streamingAssetsPath, csvFileName);
-#else
-                Path.Combine((Application.streamingAssetsPath ?? (Application.dataPath + "/StreamingAssets")), csvFileName);
-#endif
-            if (!File.Exists(path))
+            // Load from Resources (place file at Assets/Resources/trials_plan.csv)
+            TextAsset ta = Resources.Load<TextAsset>("trials_plan");
+            if (ta == null)
             {
-                Debug.LogWarning($"[MissingObjectTask] CSV not found: {path}");
+                Debug.LogError("[MissingObjectTask] Resources/trials_plan.csv not found.");
                 return false;
             }
 
-            var lines = File.ReadAllLines(path);
+            var lines = ta.text.Split(new[] {'\n','\r'}, System.StringSplitOptions.RemoveEmptyEntries);
             if (lines.Length <= 1) return false;
 
             plan.Clear();
-            // header: trial_id,set_size,change,missing_index,grid_seed
             for (int i = 1; i < lines.Length; i++)
             {
-                var line = lines[i].Trim();
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                var c = line.Split(',');
+                var c = lines[i].Trim().Split(',');
                 if (c.Length < 5) continue;
 
                 plan.Add(new TrialSpec
                 {
-                    trialId      = int.Parse(c[0], CultureInfo.InvariantCulture),
-                    setSize      = int.Parse(c[1], CultureInfo.InvariantCulture),
-                    change       = (c[2] == "1" || c[2].Equals("true", StringComparison.OrdinalIgnoreCase)),
-                    missingIndex = int.Parse(c[3], CultureInfo.InvariantCulture),
-                    gridSeed     = int.Parse(c[4], CultureInfo.InvariantCulture),
+                    trialId      = int.Parse(c[0]),
+                    setSize      = int.Parse(c[1]),
+                    change       = (c[2] == "1" || c[2].ToLower() == "true"),
+                    missingIndex = int.Parse(c[3]),
+                    gridSeed     = int.Parse(c[4]),
                 });
             }
 
-            if (plan.Count == 0) return false;
-
-            Debug.Log($"[MissingObjectTask] Loaded plan with {plan.Count} trials from {path}.");
-            return true;
+            Debug.Log($"[MissingObjectTask] Loaded plan with {plan.Count} trials from Resources.");
+            return plan.Count > 0;
         }
-        catch (Exception ex)
+        catch (System.Exception ex)
         {
             Debug.LogError($"[MissingObjectTask] Failed to read CSV: {ex.Message}");
             return false;
@@ -330,6 +364,7 @@ public class MissingObjectTaskController : MonoBehaviour
         }
 
         // Wait for keyboard response or timeout
+        _responded = false;
         awaitingResponse = true;
         float t = 0f;
         while (awaitingResponse && t < testMaxSecs)
