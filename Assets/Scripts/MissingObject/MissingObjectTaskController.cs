@@ -60,17 +60,20 @@ public class MissingObjectTaskController : MonoBehaviour
     // ---------------------------------------------------------------------
     [Header("Experiment (timing)")]
     [Tooltip("Break between trials (seconds).")]
-    public float interTrialSecs = 1f;
+    public float interTrialSecs = 3.5f;
 
     [Header("Timing (seconds)")]
     [Tooltip("Study display duration.")]
-    public float studySecs = 3f;
+    public float studySecs = 1f;
 
     [Tooltip("Blank interval between Study and Test.")]
-    public float retentionSecs = 1f;
+    public float retentionSecs = 0.6f;
 
     [Tooltip("Max time to allow a response in Test before timing out.")]
-    public float testMaxSecs = 6f;
+    public float testMaxSecs = 2f;
+
+    [Tooltip("How long the TEST display remains visible.")]
+    public float testDisplaySecs = 1f;
 
     // ---------------------------------------------------------------------
     // Appearance & geometry
@@ -80,10 +83,10 @@ public class MissingObjectTaskController : MonoBehaviour
     public int gridSize = 3;
 
     [Tooltip("Spacing between grid cells (meters).")]
-    public float gridSpacing = 0.25f;
+    public float gridSpacing = 0.011f;
 
     [Tooltip("Object size (meters). 0.1 = 10 cm.")]
-    public float objectScale = 0.1f;
+    public float objectScale = 0.03f;
 
     [Header("Appearance")]
     [Tooltip("Materials used to color spawned objects (optional but recommended).")]
@@ -128,6 +131,8 @@ public class MissingObjectTaskController : MonoBehaviour
     private bool isChangeTrial = true;    // from CSV
     private bool awaitingResponse = false;
     private bool _aoiMapLoggedThisTrial = false; // ensures AOI map is logged only once (during Study)
+
+    private IEnumerator HideAfter(float seconds) { yield return new WaitForSeconds(seconds); ClearObjects(); }
 
     private void OnEnable()
     {
@@ -325,7 +330,7 @@ public class MissingObjectTaskController : MonoBehaviour
         if (logger != null) { logger.currentPhase = "STUDY"; logger.LogEvent("PHASE_START","STUDY"); }
         SetInstruction("Memorize the objects…");
         SpawnFromPlan(); // spawns objects using the pre-planned layout & colors
-        yield return new WaitForSeconds(studySecs);
+        yield return new WaitForSeconds(1f);
         if (logger != null)
         {
             logger.FlushFixationAtPhaseEnd();
@@ -345,25 +350,25 @@ public class MissingObjectTaskController : MonoBehaviour
         }
 
         // ---- TEST ----
-        if (logger != null)
-        {
+        if (logger != null) {
             logger.currentPhase = "TEST";
-            logger.LogEvent("PHASE_START",$"TEST;change={isChangeTrial};missingIndex={missingIndex}");
+            logger.LogEvent("PHASE_START", $"TEST;change={isChangeTrial};missingIndex={missingIndex}");
         }
         testPhaseStartTime = Time.realtimeSinceStartupAsDouble;
 
         SetInstruction("Which one is missing?");
-        SpawnFromPlan(); // recreate the exact same display as Study
+        SpawnFromPlan();
 
-        // Remove exactly one item on change trials (the same index we planned).
         if (isChangeTrial && missingIndex >= 0 && missingIndex < spawned.Count && spawned[missingIndex] != null)
         {
-            Destroy(spawned[missingIndex]);  // remove item
-            spawned[missingIndex] = null;    // keep list aligned
-            if (logger != null) logger.LogRemoval(trialId, missingIndex);
+            Destroy(spawned[missingIndex]);
+            spawned[missingIndex] = null;
+            logger?.LogRemoval(trialId, missingIndex);
         }
 
-        // Wait for keyboard response or timeout
+        // Hide the stimulus after 0.6 s, but keep waiting for a response up to testMaxSecs
+        StartCoroutine(HideAfter(testDisplaySecs));
+
         _responded = false;
         awaitingResponse = true;
         float t = 0f;
@@ -373,16 +378,20 @@ public class MissingObjectTaskController : MonoBehaviour
             yield return null;
         }
 
-        // If no response, treat as "No" (policy choice; adjust if you prefer)
+        // If no response, mark timeout (policy as before)
         if (awaitingResponse)
         {
-            if (logger != null) logger.LogEvent("TIMEOUT", testMaxSecs.ToString("F2"));
+            logger?.LogEvent("TIMEOUT", testMaxSecs.ToString("F2"));
             OnResponse(false);
         }
 
-        // short pause so participant can see feedback
-        yield return new WaitForSeconds(0.5f);
-        SetInstruction("Trial finished.");
+        // ensure stimulus is hidden (in case it was still visible)
+        ClearObjects();
+        logger?.LogEvent("PHASE_END", "TEST");
+
+        // Inter-trial blank
+        yield return new WaitForSeconds(interTrialSecs);
+        SetInstruction("");
     }
 
     // =====================================================================
