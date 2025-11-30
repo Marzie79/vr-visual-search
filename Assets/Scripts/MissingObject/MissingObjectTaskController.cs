@@ -64,7 +64,7 @@ public class MissingObjectTaskController : MonoBehaviour
 
     [Header("Timing (seconds)")]
     [Tooltip("Study display duration.")]
-    public float studySecs = 1f;
+    public float studySecs = 1.2f;
 
     [Tooltip("Blank interval between Study and Test.")]
     public float retentionSecs = 0.6f;
@@ -79,8 +79,8 @@ public class MissingObjectTaskController : MonoBehaviour
     // Appearance & geometry
     // ---------------------------------------------------------------------
     [Header("Grid & Size")]
-    [Tooltip("Grid dimension (gridSize x gridSize). 3 = 3x3.")]
-    public int gridSize = 3;
+    [Tooltip("Grid dimension (gridSize x gridSize). 4 = 4x4.")]
+    public int gridSize = 4;
 
     [Tooltip("Spacing between grid cells (meters).")]
     public float gridSpacing = 0.011f;
