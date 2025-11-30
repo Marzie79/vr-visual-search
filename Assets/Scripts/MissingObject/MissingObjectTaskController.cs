@@ -83,7 +83,7 @@ public class MissingObjectTaskController : MonoBehaviour
     public int gridSize = 4;
 
     [Tooltip("Spacing between grid cells (meters).")]
-    public float gridSpacing = 0.011f;
+    public float gridSpacing = 0.06f;
 
     [Tooltip("Object size (meters). 0.1 = 10 cm.")]
     public float objectScale = 0.03f;
@@ -110,11 +110,15 @@ public class MissingObjectTaskController : MonoBehaviour
     [Serializable]
     private class TrialSpec
     {
-        public int trialId;
-        public int setSize;
+        public int  trialId;
         public bool change;
-        public int missingIndex; // -1 if no change
-        public int gridSeed;     // used only to place items deterministically
+        public int  missingCell;      // 0..15, -1 if no disappearance
+
+        // NEW: extra cube in TEST
+        public int    addedCell;      // 0..15, -1 if no extra (but you’ll always set >=0)
+        public string addedColor;     // material name for the added cube
+
+        public string[] cellColors = new string[16];  // STUDY colors per cell
     }
 
     private readonly List<TrialSpec> plan = new List<TrialSpec>();
@@ -126,6 +130,9 @@ public class MissingObjectTaskController : MonoBehaviour
     private readonly List<GameObject> spawned      = new List<GameObject>(); // currently visible items
     private readonly List<int>        currentSlots = new List<int>();        // chosen grid cells for this trial
     private readonly List<Material>   currentMats  = new List<Material>();   // chosen materials (colors)
+    // extra cube (TEST only)
+    private int      addedCellIndex = -1;
+    private Material addedMat       = null;
     private int  currentN = 0;            // number of items this trial (from CSV set_size)
     private int  missingIndex = -1;       // which item is removed at Test on change trials (index into current display)
     private bool isChangeTrial = true;    // from CSV
@@ -226,6 +233,19 @@ public class MissingObjectTaskController : MonoBehaviour
         if (logger != null) logger.EndSession();
     }
 
+    private int SafeParseInt(string s, int defaultValue)
+    {
+        if (string.IsNullOrWhiteSpace(s))
+            return defaultValue;
+
+        if (int.TryParse(s.Trim(), System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out int v))
+            return v;
+
+        Debug.LogWarning($"[MissingObjectTask] Could not parse int '{s}', using {defaultValue}.");
+        return defaultValue; 
+    }   
+
     // =====================================================================
     // CSV loader (deterministic trials for everyone)
     // =====================================================================
@@ -233,7 +253,6 @@ public class MissingObjectTaskController : MonoBehaviour
     {
         try
         {
-            // Load from Resources (place file at Assets/Resources/trials_plan.csv)
             TextAsset ta = Resources.Load<TextAsset>("trials_plan");
             if (ta == null)
             {
@@ -241,33 +260,69 @@ public class MissingObjectTaskController : MonoBehaviour
                 return false;
             }
 
-            var lines = ta.text.Split(new[] {'\n','\r'}, System.StringSplitOptions.RemoveEmptyEntries);
+            var lines = ta.text.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
             if (lines.Length <= 1) return false;
 
             plan.Clear();
+
             for (int i = 1; i < lines.Length; i++)
             {
-                var c = lines[i].Trim().Split(',');
-                if (c.Length < 5) continue;
+                var line = lines[i].Trim();
+                if (string.IsNullOrWhiteSpace(line)) continue;
 
-                plan.Add(new TrialSpec
+                var c = line.Split(',');
+                // trial_id,change,missing_cell,added_cell,added_color + 16 cells
+                if (c.Length < 5 + 16)
                 {
-                    trialId      = int.Parse(c[0]),
-                    setSize      = int.Parse(c[1]),
-                    change       = (c[2] == "1" || c[2].ToLower() == "true"),
-                    missingIndex = int.Parse(c[3]),
-                    gridSeed     = int.Parse(c[4]),
-                });
+                    Debug.LogWarning($"[MissingObjectTask] Skipping short line {i + 1}");
+                    continue;
+                }
+
+                var spec = new TrialSpec();
+
+                spec.trialId     = SafeParseInt(c[0], -1);
+                spec.change      = SafeParseInt(c[1], 0) == 1;
+                spec.missingCell = SafeParseInt(c[2], -1);
+
+                spec.addedCell   = SafeParseInt(c[3], -1);   // -1 = no extra cube this trial
+                spec.addedColor  = c[4].Trim();
+
+                spec.cellColors = new string[16];
+                for (int cell = 0; cell < 16; cell++)
+                {
+                    string v = c[5 + cell].Trim();
+                    spec.cellColors[cell] = string.IsNullOrEmpty(v) ? null : v;
+                }
+
+                plan.Add(spec);
             }
 
             Debug.Log($"[MissingObjectTask] Loaded plan with {plan.Count} trials from Resources.");
             return plan.Count > 0;
         }
-        catch (System.Exception ex)
+        catch (Exception ex)
         {
             Debug.LogError($"[MissingObjectTask] Failed to read CSV: {ex.Message}");
             return false;
         }
+    }
+
+
+    private Material FindMaterialByName(string colorName)
+    {
+        if (string.IsNullOrEmpty(colorName) || objectMaterials == null)
+            return null;
+
+        for (int i = 0; i < objectMaterials.Length; i++)
+        {
+            if (objectMaterials[i] != null &&
+                string.Equals(objectMaterials[i].name, colorName, StringComparison.OrdinalIgnoreCase))
+            {
+                return objectMaterials[i];
+            }
+        }
+        Debug.LogWarning($"[MissingObjectTask] No material named '{colorName}' found.");
+        return null;
     }
 
     // =====================================================================
@@ -279,40 +334,51 @@ public class MissingObjectTaskController : MonoBehaviour
 
         for (planIndex = 0; planIndex < plan.Count; planIndex++)
         {
-            var spec = plan[planIndex];
-            trialId       = spec.trialId;
-            isChangeTrial = spec.change;
-            missingIndex  = spec.missingIndex;
-            currentN      = spec.setSize;
+            var spec   = plan[planIndex];
+            trialId    = spec.trialId;
 
-            // Inform the logger that a new trial starts (so CSVs are labeled correctly)
+            // NEW: build currentSlots/currentMats, set currentN, isChangeTrial, missingIndex
+            PrepareTrial(spec);
+
+            // Inform the logger that a new trial starts
             if (logger != null)
             {
                 logger.currentTrialId = trialId;
                 logger.setSize        = currentN;
                 logger.retentionS     = retentionSecs;
-                logger.LogEvent("TRIAL_START", $"setSize={currentN};retention={retentionSecs:F2};change={(isChangeTrial?1:0)};missingIndex={missingIndex};gridSeed={spec.gridSeed}");
+
+                logger.LogEvent(
+                    "TRIAL_START",
+                    $"setSize={currentN};retention={retentionSecs:F2};" +
+                    $"change={(isChangeTrial ? 1 : 0)};missingCell={spec.missingCell}"
+                );
+
                 logger.LogTrialMeta(
-                    trialId, currentN, retentionSecs,
-                    isChangeTrial, missingIndex,
-                    gridSize, gridSpacing, objectScale,
-                    studySecs, testMaxSecs
+                    trialId,
+                    currentN,
+                    retentionSecs,
+                    isChangeTrial,
+                    missingIndex,
+                    gridSize,
+                    gridSpacing,
+                    objectScale,
+                    studySecs,
+                    testMaxSecs
                 );
             }
 
             SetInstruction($"Trial {trialId}/{plan.Count}\nMemorize the objects…");
 
-            // Run one Study→Retention→Test→Response cycle (with deterministic plan)
+            // Run one Study→Retention→Test→Response cycle
             yield return RunTrial(spec);
 
-            // Trial cleanup marker (good for analysis scripts)
-            if (logger != null) logger.LogEvent("TRIAL_END", "");
+            logger?.LogEvent("TRIAL_END", "");
 
             // Short break between trials
             yield return new WaitForSeconds(interTrialSecs);
         }
 
-        if (logger != null) logger.LogEvent("SESSION_END", "");
+        logger?.LogEvent("SESSION_END", "");
         SetInstruction("Experiment finished.");
     }
 
@@ -322,7 +388,7 @@ public class MissingObjectTaskController : MonoBehaviour
     private IEnumerator RunTrial(TrialSpec spec)
     {
         // Pre-compute the exact slots/materials deterministically from gridSeed
-        PlanTrialFromSpec(spec);
+        // PlanTrialFromSpec(spec);
 
         _aoiMapLoggedThisTrial = false;
 
@@ -366,6 +432,30 @@ public class MissingObjectTaskController : MonoBehaviour
             logger?.LogRemoval(trialId, missingIndex);
         }
 
+        // --- NEW: always add an extra cube in TEST ---
+        if (addedCellIndex >= 0)
+        {
+            Vector3 pos = SlotToWorld(addedCellIndex);
+
+            var extra = Instantiate(objectPrefab, pos, Quaternion.identity, table);
+            extra.transform.localScale = Vector3.one * objectScale;
+
+            if (addedMat != null)
+            {
+                var r = extra.GetComponent<Renderer>();
+                if (r != null) r.material = addedMat;
+            }
+            spawned.Add(extra);
+
+            // AOI tagging
+            var tag = extra.AddComponent<AoiTag>();
+            tag.slotIndex = spawned.Count - 1;
+            tag.aoiId     = $"r{(addedCellIndex / gridSize)}_c{(addedCellIndex % gridSize)}";
+            tag.label     = addedMat ? addedMat.name : "added";
+
+            logger?.LogEvent("ADD_CUBE", $"trial={trialId};cell={addedCellIndex};color={spec.addedColor}");
+        }
+
         // Hide the stimulus after 0.6 s, but keep waiting for a response up to testMaxSecs
         StartCoroutine(HideAfter(testDisplaySecs));
 
@@ -397,46 +487,34 @@ public class MissingObjectTaskController : MonoBehaviour
     // =====================================================================
     // Trial planning from CSV: choose slots/colors deterministically
     // =====================================================================
-    private void PlanTrialFromSpec(TrialSpec spec)
+    private void PrepareTrial(TrialSpec spec)
     {
         currentSlots.Clear();
         currentMats.Clear();
 
-        // Clamp set size to grid capacity
-        int totalCells = Mathf.Max(1, gridSize) * Mathf.Max(1, gridSize);
-        currentN = Mathf.Clamp(spec.setSize, 1, totalCells);
+        // STUDY layout from CSV
+        for (int cell = 0; cell < 16; cell++)
+        {
+            string colorName = spec.cellColors[cell];
+            if (!string.IsNullOrEmpty(colorName))
+            {
+                currentSlots.Add(cell);
+                currentMats.Add(FindMaterialByName(colorName));
+            }
+        }
 
-        // Decide change/no-change and the missing index *from CSV*
+        currentN      = currentSlots.Count;
         isChangeTrial = spec.change;
-        missingIndex  = isChangeTrial ? Mathf.Clamp(spec.missingIndex, 0, currentN - 1) : -1;
 
-        // Build a shuffled list of all grid cells using a deterministic RNG from gridSeed
-        var all = new List<int>(totalCells);
-        for (int i = 0; i < totalCells; i++) all.Add(i);
+        // map missingCell → index in currentSlots
+        if (isChangeTrial && spec.missingCell >= 0)
+            missingIndex = currentSlots.IndexOf(spec.missingCell);
+        else
+            missingIndex = -1;
 
-        var rng = new System.Random(spec.gridSeed);
-        for (int i = all.Count - 1; i > 0; i--)
-        {
-            int r = rng.Next(i + 1); // [0..i]
-            (all[i], all[r]) = (all[r], all[i]);
-        }
-
-        // Choose the first N shuffled cells for this trial’s slots
-        for (int i = 0; i < currentN; i++) currentSlots.Add(all[i]);
-
-        // Freeze colors deterministically too (so Study/Test match exactly)
-        for (int i = 0; i < currentN; i++)
-        {
-            if (objectMaterials != null && objectMaterials.Length > 0)
-            {
-                int idx = rng.Next(objectMaterials.Length);
-                currentMats.Add(objectMaterials[idx]);
-            }
-            else
-            {
-                currentMats.Add(null); // use prefab’s default material if none provided
-            }
-        }
+        // NEW: extra cube info
+        addedCellIndex = spec.addedCell;
+        addedMat       = FindMaterialByName(spec.addedColor);
     }
 
     // =====================================================================
