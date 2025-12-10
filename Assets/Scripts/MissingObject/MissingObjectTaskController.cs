@@ -16,6 +16,7 @@ using UnityEngine.InputSystem; // for InputAction / InputActionProperty
 ///   trial_id,set_size,change,missing_index,grid_seed
 /// Example:
 ///   1,6,1,2,1001
+/// A in hand tracker means Yes we have missing object but B means No we do not have any missing object.
 /// </summary>
 public class MissingObjectTaskController : MonoBehaviour
 {
@@ -46,6 +47,9 @@ public class MissingObjectTaskController : MonoBehaviour
     [Tooltip("Table transform (items are placed on top of this).")]
     public Transform table;
 
+    [Tooltip("An empty object transform (items are placed on top of this).")]
+    public Transform gridRoot;
+
     [Tooltip("Small cube/sphere prefab to spawn as objects (a BLUE prefab asset).")]
     public GameObject objectPrefab;
 
@@ -64,7 +68,7 @@ public class MissingObjectTaskController : MonoBehaviour
 
     [Header("Timing (seconds)")]
     [Tooltip("Study display duration.")]
-    public float studySecs = 1.2f;
+    public float studySecs = 1.5f;
 
     [Tooltip("Blank interval between Study and Test.")]
     public float retentionSecs = 0.6f;
@@ -73,7 +77,7 @@ public class MissingObjectTaskController : MonoBehaviour
     public float testMaxSecs = 2f;
 
     [Tooltip("How long the TEST display remains visible.")]
-    public float testDisplaySecs = 1f;
+    public float testDisplaySecs = 1.5f;
 
     // ---------------------------------------------------------------------
     // Appearance & geometry
@@ -81,12 +85,11 @@ public class MissingObjectTaskController : MonoBehaviour
     [Header("Grid & Size")]
     [Tooltip("Grid dimension (gridSize x gridSize). 4 = 4x4.")]
     public int gridSize = 4;
+    public float gridSpacing = 0.8f;
+    public float objectScale = 0.25f;
+    public float desiredGap = 3f; // actual empty space between cubes
 
-    [Tooltip("Spacing between grid cells (meters).")]
-    public float gridSpacing = 0.06f;
-
-    [Tooltip("Object size (meters). 0.1 = 10 cm.")]
-    public float objectScale = 0.03f;
+    private float _cubeWidth;
 
     [Header("Appearance")]
     [Tooltip("Materials used to color spawned objects (optional but recommended).")]
@@ -178,20 +181,53 @@ public class MissingObjectTaskController : MonoBehaviour
     // =====================================================================
     // Unity lifecycle
     // =====================================================================
+    private float _cubeWidthWorld;
+
     private void Awake()
     {
         if (!cam) cam = Camera.main;
 
-        // Hard requirements: a table and an object prefab must be assigned
-        if (!table)        { Debug.LogError("[MissingObjectTask] Table is not assigned.", this); enabled = false; return; }
-        if (!objectPrefab) { Debug.LogError("[MissingObjectTask] Object Prefab is not assigned.", this); enabled = false; return; }
+        if (!table)
+        {
+            Debug.LogError("[MissingObjectTask] Table is not assigned.", this);
+            enabled = false;
+            return;
+        }
+        if (!objectPrefab)
+        {
+            Debug.LogError("[MissingObjectTask] Object Prefab is not assigned.", this);
+            enabled = false;
+            return;
+        }
 
         _gaze = gazeSourceComponent as IGazeSource;
+
+        // --- NEW: compute cube world width from prefab mesh ---
+        var rend = objectPrefab.GetComponent<Renderer>();
+        if (rend != null)
+        {
+            // mesh size in local units
+            float meshWidthLocal = rend.bounds.size.x / objectPrefab.transform.lossyScale.x;
+
+            // width in world units with our objectScale
+            _cubeWidthWorld = meshWidthLocal * objectScale;
+
+            // center-to-center distance = cube width + desired gap
+            gridSpacing = _cubeWidthWorld + desiredGap;
+
+            Debug.Log($"[MissingObjectTask] cubeWidth={_cubeWidthWorld:F3}, " +
+                    $"desiredGap={desiredGap:F3}, gridSpacing={gridSpacing:F3}");
+        }
+        else
+        {
+            Debug.LogWarning("[MissingObjectTask] Object prefab has no Renderer; using existing gridSpacing.");
+        }
 
         // UI defaults
         if (feedbackText) feedbackText.gameObject.SetActive(false);
         SetInstruction("Ready…");
     }
+
 
     private void Start()
     {
@@ -221,7 +257,7 @@ public class MissingObjectTaskController : MonoBehaviour
         if (logger != null) logger.LogFrame();
 
         // Keyboard response (Yes/No) while we're waiting for the participant
-        if (awaitingResponse)
+        if (awaitingResponse && !_responded)
         {
             if (Input.GetKeyDown(KeyCode.Y)) OnResponse(true);   // Yes: something is missing
             if (Input.GetKeyDown(KeyCode.N)) OnResponse(false);  // No: nothing is missing
@@ -396,7 +432,7 @@ public class MissingObjectTaskController : MonoBehaviour
         if (logger != null) { logger.currentPhase = "STUDY"; logger.LogEvent("PHASE_START","STUDY"); }
         SetInstruction("Memorize the objects…");
         SpawnFromPlan(); // spawns objects using the pre-planned layout & colors
-        yield return new WaitForSeconds(1f);
+        yield return new WaitForSeconds(studySecs);
         if (logger != null)
         {
             logger.FlushFixationAtPhaseEnd();
@@ -408,7 +444,7 @@ public class MissingObjectTaskController : MonoBehaviour
         if (logger != null) { logger.currentPhase = "RETENTION"; logger.LogEvent("PHASE_START","RETENTION"); }
         ClearObjects();
         SetInstruction("+"); // simple fixation cross
-        yield return new WaitForSeconds(retentionSecs);
+        yield return new WaitForSeconds(studySecs);
         if (logger != null)
         {
             // If you want a sequence row for RETENTION, you can add FlushPhaseSequences() here.
@@ -437,7 +473,7 @@ public class MissingObjectTaskController : MonoBehaviour
         {
             Vector3 pos = SlotToWorld(addedCellIndex);
 
-            var extra = Instantiate(objectPrefab, pos, Quaternion.identity, table);
+            var extra = Instantiate(objectPrefab, pos, Quaternion.identity, gridRoot);
             extra.transform.localScale = Vector3.one * objectScale;
 
             if (addedMat != null)
@@ -472,7 +508,9 @@ public class MissingObjectTaskController : MonoBehaviour
         if (awaitingResponse)
         {
             logger?.LogEvent("TIMEOUT", testMaxSecs.ToString("F2"));
-            OnResponse(false);
+
+            // treat as a (false) response coming from timeout
+            OnResponse(false, fromTimeout: true);
         }
 
         // ensure stimulus is hidden (in case it was still visible)
@@ -529,7 +567,7 @@ public class MissingObjectTaskController : MonoBehaviour
             int slot = currentSlots[i];
             Vector3 pos = SlotToWorld(slot);
 
-            var go = Instantiate(objectPrefab, pos, Quaternion.identity, table);
+            var go = Instantiate(objectPrefab, pos, Quaternion.identity, gridRoot);
             go.transform.localScale = Vector3.one * objectScale;
 
             // Apply pre-chosen material (so no color change between Study/Test)
@@ -576,14 +614,12 @@ public class MissingObjectTaskController : MonoBehaviour
         float x = (col - (gridSize - 1) / 2f) * gridSpacing;
         float z = (row - (gridSize - 1) / 2f) * gridSpacing;
 
-        // Estimate table top height: assumes the table pivot is centered vertically.
         float tableTopY = table.position.y + (table.lossyScale.y * 0.5f);
-
-        // Place object so it rests on the table with a small epsilon to avoid z-fighting.
-        float y = tableTopY + (objectScale * 0.5f) + 0.005f;
+        float y         = tableTopY + (objectScale * 0.5f) + 0.005f;
 
         return new Vector3(table.position.x + x, y, table.position.z + z);
     }
+
 
     // =====================================================================
     // Response handling (unchanged)
@@ -593,30 +629,36 @@ public class MissingObjectTaskController : MonoBehaviour
     /// We decide correctness by comparing against the ground truth (isChangeTrial).
     /// We log RESPONSE, CORRECT, RT, and close the TEST phase.
     /// </summary>
-    public void OnResponse(bool saidPresent)
+    public void OnResponse(bool saidPresent, bool fromTimeout = false)
     {
         awaitingResponse = false;
+        _responded = true;
 
         bool actuallyMissing = isChangeTrial;              // ground truth for this trial
-        bool correct = (saidPresent == actuallyMissing);   // compare to participant’s answer
+
+        // If response is from timeout, always mark it as incorrect (or handle however you want)
+        bool correct = fromTimeout ? false : (saidPresent == actuallyMissing);
+
         double rtMs = (Time.realtimeSinceStartupAsDouble - testPhaseStartTime) * 1000.0;
 
         // One-row trial summary (for quick accuracy/RT analysis)
         if (logger != null)
             logger.LogTrialResult(trialId, saidPresent, correct, rtMs, isChangeTrial, missingIndex);
 
-        // End TEST phase; also flush current fixation and write the TEST sequence row
         if (logger != null)
         {
             logger.FlushFixationAtPhaseEnd();
-            logger.FlushPhaseSequences();                  // ensures sequences.csv has a TEST row
+            logger.FlushPhaseSequences();
             logger.LogEvent("RESPONSE", saidPresent ? "YES" : "NO");
             logger.LogEvent("CORRECT",  correct ? "1" : "0");
             logger.LogEvent("RT_MS",    rtMs.ToString("F1", CultureInfo.InvariantCulture));
+
+            if (fromTimeout)
+                logger.LogEvent("RESPONSE_TYPE", "TIMEOUT");
+
             logger.LogEvent("PHASE_END","TEST");
         }
 
-        // Optional on-screen feedback for debugging/training
         if (feedbackText)
         {
             feedbackText.gameObject.SetActive(true);
@@ -624,9 +666,8 @@ public class MissingObjectTaskController : MonoBehaviour
             feedbackText.color = correct ? Color.green : Color.red;
         }
 
-        Debug.Log($"Response: {saidPresent} (correct={correct}, RT={rtMs:F1}ms, changeTrial={isChangeTrial}, missingIndex={missingIndex})");
+        Debug.Log($"Response: {saidPresent} (correct={correct}, RT={rtMs:F1}ms, changeTrial={isChangeTrial}, missingIndex={missingIndex}, timeout={fromTimeout})");
     }
-
     // ---------------------------------------------------------------------
     // Small UI helpers (null-safe)
     // ---------------------------------------------------------------------
